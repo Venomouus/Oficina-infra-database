@@ -1,0 +1,20 @@
+project_name           = "oficina"
+aws_region             = "us-east-1"
+postgres_major_version = "16"
+allocated_storage_gib  = 20
+backup_retention_days  = 7
+
+# Concessao de custo do laboratorio. Ainda nao ha banco provisionado.
+multi_az = false
+
+# Dois bancos logicos na mesma instancia planejada.
+environments = {
+  staging = {
+    branch        = "develop"
+    database_name = "oficina_staging"
+  }
+  producao = {
+    branch        = "master"
+    database_name = "oficina_producao"
+  }
+}
