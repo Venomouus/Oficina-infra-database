@@ -4,13 +4,13 @@ variable "project_name" {
   default     = "oficina"
 
   validation {
-    condition     = can(regex("^[a-z][a-z0-9-]{1,29}$", var.project_name))
+    condition     = can(regex("^[a-z][a-z0-9-]{1,29}$", var.project_name)) && !strcontains(var.project_name, "--") && !endswith(var.project_name, "-")
     error_message = "Use de 2 a 30 caracteres: letras minusculas, numeros e hifens, iniciando com letra."
   }
 }
 
 variable "aws_region" {
-  description = "Regiao planejada; deve ser alinhada com a rede do repositorio Kubernetes."
+  description = "Regiao do RDS; deve coincidir com a rede do repositorio Kubernetes."
   type        = string
   default     = "us-east-1"
 
@@ -21,18 +21,18 @@ variable "aws_region" {
 }
 
 variable "postgres_major_version" {
-  description = "Versao principal planejada, alinhada ao PostgreSQL 16 local. A versao RDS exata sera verificada antes do deploy."
+  description = "Versao principal alinhada ao PostgreSQL 16 local. RDS resolve a minor suportada."
   type        = string
   default     = "16"
 
   validation {
-    condition     = can(regex("^[1-9][0-9]+$", var.postgres_major_version))
-    error_message = "Informe a versao principal numerica, como 16."
+    condition     = var.postgres_major_version == "16"
+    error_message = "Esta fundacao suporta PostgreSQL 16; outra versao exige revisao da compatibilidade."
   }
 }
 
 variable "allocated_storage_gib" {
-  description = "Armazenamento planejado. Limite de projeto para o laboratorio: 20 a 100 GiB."
+  description = "Armazenamento inicial. Limite de projeto para o laboratorio: 20 a 100 GiB."
   type        = number
   default     = 20
 
@@ -47,7 +47,7 @@ variable "allocated_storage_gib" {
 }
 
 variable "backup_retention_days" {
-  description = "Retencao planejada para backups automaticos, sem desabilita-los."
+  description = "Retencao de backups automaticos, sem desabilita-los."
   type        = number
   default     = 7
 
@@ -62,13 +62,13 @@ variable "backup_retention_days" {
 }
 
 variable "multi_az" {
-  description = "Configuracao futura de disponibilidade. false e uma concessao de custo do laboratorio, sem failover Multi-AZ."
+  description = "false e uma concessao de custo do laboratorio, sem failover Multi-AZ."
   type        = bool
   default     = false
 }
 
 variable "environments" {
-  description = "Bancos logicos distintos na mesma instancia RDS planejada."
+  description = "Contrato dos bancos logicos distintos; sua criacao e concessao de privilegios exigem bootstrap posterior."
   type = map(object({
     branch        = string
     database_name = string
