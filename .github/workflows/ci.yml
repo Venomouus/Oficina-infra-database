@@ -13,7 +13,7 @@ permissions:
 jobs:
   validate-terraform:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: infra
@@ -32,3 +32,28 @@ jobs:
         run: terraform validate -no-color
       - name: Test infrastructure contracts with mocked AWS
         run: terraform test -no-color
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Checkout reviewed API migration contract
+        uses: actions/checkout@v4
+        with:
+          repository: Venomouus/Oficina-Mecanica
+          ref: c9733c35372124e15fe470ca3e8373a86c3f0e53
+          path: .integration-api
+          persist-credentials: false
+      - name: Setup .NET for migration SQL generation
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Generate real migration SQL without connecting to a database
+        working-directory: .integration-api
+        run: |
+          dotnet tool restore
+          dotnet ef migrations script --project Oficina.Infrastructure --startup-project Oficina.Infrastructure --output "${{ github.workspace }}/migrations.generated.sql"
+      - name: Test bootstrap and privileges on disposable PostgreSQL 16
+        working-directory: .
+        env:
+          BOOTSTRAP_MIGRATIONS_SQL: ${{ github.workspace }}/migrations.generated.sql
+        run: python -m unittest discover -s bootstrap/tests -v
