@@ -22,3 +22,10 @@ crash.*.log
 .idea/
 .DS_Store
 Thumbs.db
+
+# Bootstrap e testes locais
+__pycache__/
+*.pyc
+*.generated.json
+*.generated.sql
+.integration-api/
