@@ -25,14 +25,14 @@ Periodos antigos sem inicio conhecido ou ainda abertos exigem tratamento explici
 
 ## Ambientes e acesso
 
-O bootstrap deve criar bancos separados, por exemplo:
+O bootstrap implementado em bootstrap/bootstrap.py cria bancos separados a partir do contrato:
 
-| Ambiente | Banco | Roles planejadas |
+| Ambiente | Banco | Roles do bootstrap |
 |---|---|---|
 | staging / develop | oficina_staging | oficina_staging_app, oficina_staging_auth, oficina_staging_migrations |
 | producao / master | oficina_producao | oficina_producao_app, oficina_producao_auth, oficina_producao_migrations |
 
-Conceder DML a API, leitura limitada de clientes ao autenticador e DDL somente a migrations. Configurar grants atuais e default privileges, revogando o acesso PUBLIC entre ambientes. A conta mestre serve somente a bootstrap/administracao controlada.
+O bootstrap concede DML nas tabelas de negocio a API, SELECT em Clientes(Id, Ativo, CpfCnpj) ao autenticador e DDL somente a migrations. Revoga acesso PUBLIC aos bancos/schemas e mantem objetos futuros sem grants de runtime. A conta mestre serve somente a bootstrap/administracao controlada. Consulte [fases, credenciais e testes](../bootstrap/README.md).
 
 Migrations devem partir do mesmo codigo revisado e rodar por ambiente antes do rollout. A chamada atual de migrations no startup da API precisa ser separada antes de restringir a role de runtime.
 

@@ -215,3 +215,18 @@ run "reject_subnet_in_other_vpc" {
   }
   expect_failures = [aws_db_subnet_group.database]
 }
+
+run "separate_secret_destinations_without_passwords" {
+  command = apply
+  assert {
+    condition = (
+      toset(keys(aws_secretsmanager_secret.runtime)) == toset(["staging_app", "staging_migrations", "producao_app", "producao_migrations"]) &&
+      aws_secretsmanager_secret.runtime["staging_app"].name == "oficina/staging/database/app" &&
+      aws_secretsmanager_secret.runtime["producao_migrations"].name == "oficina/producao/database/migrations" &&
+      alltrue([for secret in aws_secretsmanager_secret.runtime : secret.recovery_window_in_days == 30]) &&
+      output.runtime_secret_arns.staging.app == aws_secretsmanager_secret.runtime["staging_app"].arn &&
+      output.runtime_secret_arns.producao.migrations == aws_secretsmanager_secret.runtime["producao_migrations"].arn
+    )
+    error_message = "API/migrations exigem segredos distintos por ambiente, com recuperacao e sem duplicar o segredo auth do serverless."
+  }
+}

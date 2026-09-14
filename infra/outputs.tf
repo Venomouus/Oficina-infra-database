@@ -1,5 +1,5 @@
 output "database" {
-  description = "Contrato de conectividade; bancos logicos e roles ainda exigem bootstrap."
+  description = "Contrato de conectividade para bootstrap/bootstrap.py; bancos logicos/roles so existem apos executar o bootstrap."
   value = {
     contract_version      = 1
     aws_region            = var.aws_region
