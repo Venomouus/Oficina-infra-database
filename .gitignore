@@ -1,4 +1,8 @@
 .terraform/
+backend.hcl
+*.backend.hcl
+*.pem
+*.key
 *.tfstate
 *.tfstate.*
 *.tfplan

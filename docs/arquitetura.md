@@ -1,82 +1,40 @@
-# Arquitetura planejada do banco
+# Arquitetura do banco na AWS
 
-Os recursos AWS deste documento ainda nao estao implementados.
+Uma instancia RDS PostgreSQL 16 privada atende os ambientes staging/develop e producao/master do laboratorio. A infraestrutura e compartilhada; o isolamento entre ambientes depende de bancos, roles, grants e credenciais distintos, a serem criados pelo bootstrap.
 
 ```mermaid
 flowchart LR
-    Network[Infra Kubernetes: VPC e subnets privadas] --> RDS
-    subgraph RDS[RDS PostgreSQL compartilhado do laboratorio]
-        Staging[(oficina_staging)]
-        Producao[(oficina_producao)]
-    end
-    ApiStaging[API staging] --> Staging
-    AuthStaging[Lambda autenticacao staging] --> Staging
-    ApiProducao[API producao] --> Producao
-    AuthProducao[Lambda autenticacao producao] --> Producao
-    Migration[Job de migrations da API] --> Staging
-    Migration --> Producao
-    RDS -.-> Backup[Backups e snapshots]
-    Secrets[Gerenciador de segredos] -.-> ApiStaging
-    Secrets -.-> ApiProducao
-    Secrets -.-> AuthStaging
-    Secrets -.-> AuthProducao
+  API["API no EKS — SG aplicacao"] -->|TLS 5432| SG["SG exclusivo RDS"]
+  LS["Lambda staging — SG staging"] -->|TLS 5432| SG
+  LP["Lambda producao — SG producao"] -->|TLS 5432| SG
+  SG --> RDS["RDS PostgreSQL 16 privado"]
+  RDS -. "bootstrap posterior" .-> ST["oficina_staging + roles"]
+  RDS -. "bootstrap posterior" .-> PR["oficina_producao + roles"]
+  RDS --> SM["Secrets Manager — credencial mestre"]
+  RDS --> CW["CloudWatch — PostgreSQL / upgrade"]
 ```
 
-## Separacao por ambiente
+## Limites de responsabilidade
 
-Uma instancia compartilhada reduz a quantidade de recursos do laboratorio.
-Bancos e roles distintos limitam o acesso logico, mas compartilham capacidade,
-manutencao e falhas da instancia. A branch master representa producao da
-demonstracao; isso nao declara isolamento corporativo completo.
-
-A configuracao de exemplo usa single-AZ como concessao de custo. Para a
-arquitetura de alta disponibilidade, avaliar Multi-AZ e testar recuperacao.
-O [RDS Multi-AZ](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.MultiAZSingleStandby.html)
-mantem uma instancia de espera em outra zona para failover. Isso ainda nao
-esta ativado neste projeto.
-
-## Acessos planejados
-
-| Identidade | Permissoes previstas |
+| Repositorio | Responsabilidade |
 |---|---|
-| API do ambiente | Leitura e escrita nos dados de negocio do proprio banco |
-| Lambda autenticacao | Leitura limitada ao identificador, documento e status do cliente |
-| Executor de migrations | Alteracoes de schema no banco do ambiente |
-| Administracao/bootstrap | Criacao controlada de bancos, roles e grants |
+| Oficina-infra-kubernetes | VPC, rotas, sub-redes isoladas, EKS, SGs Lambda e regras HTTPS |
+| Oficina-infra-database | RDS, subnet group, SG PostgreSQL, regras Lambda→RDS, parametros TLS, backups e logs do banco |
+| Oficina-Mecanica | Modelo EF, migrations, operacoes da oficina e autorizacao dos endpoints |
+| Oficina-serverless | Autenticacao CPF/JWT e futuras integracoes de notificacao |
 
-As credenciais administrativas nao devem ser usadas pela API ou pela Lambda.
-O bootstrap deve rever os privilegios PUBLIC, grants, acesso aos schemas e
-privilegios padrao dos objetos criados pelas migrations. Roles com nomes
-diferentes, sozinhas, nao garantem isolamento.
+O contrato de entrada `platform` usa IDs explicitos, sem ler o state completo de outro repositorio. O output `database` tem versao 1 e fornece conectividade e nomes planejados. O output separado `bootstrap_secret_arn` e metadado para a tarefa administrativa de bootstrap.
 
-Senhas e strings de conexao reais nao pertencem aos arquivos de exemplo.
-Gerenciamento de segredos, TLS e rotacao serao implementados na integracao.
+## Isolamento e disponibilidade
 
-## Backups e recuperacao
+A instancia nao possui acesso publico. Suas sub-redes possuem apenas rotas locais; o subnet group precisa de pelo menos duas AZs mesmo no modo Single-AZ. Somente os tres SGs clientes recebem ingress TCP 5432; nao ha regra de CIDR aberto.
 
-A retencao proposta e de sete dias. O RDS oferece backups automaticos e
-recuperacao dentro da janela de retencao, conforme sua configuracao.
-[Documentacao de backups](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.html).
+Esses SGs autorizam conectividade com a instancia inteira. Eles nao separam bancos por ambiente nem substituem autorizacao SQL. O SG da aplicacao tambem e compartilhado no EKS; grants, credenciais e politicas dos workloads sao necessarios.
 
-A entrega deve incluir teste de restauracao com leitura dos dados restaurados.
-Alta disponibilidade e backup atendem problemas diferentes: failover nao
-substitui recuperacao de dados removidos incorretamente.
+Single-AZ e uma concessao do laboratorio e nao oferece failover Multi-AZ. A opcao Multi-AZ esta disponivel, mas a instancia ainda compartilha capacidade e janela de manutencao entre ambientes. Veja a [decisao arquitetural](adr-rds-compartilhado.md).
 
-## Ownership
+## Seguranca e evidencias pendentes
 
-- Infra Kubernetes: rede e cluster.
-- Este repositorio: servico RDS, regras de acesso e configuracao de backups.
-- API: schema, migrations, indices e regras transacionais.
-- Serverless: adaptador de consulta do cliente e tratamento de falhas.
+A criptografia de storage usa a chave gerenciada pela AWS por padrao. O mestre e gerenciado pelo RDS no Secrets Manager, sem senha fornecida ao Terraform. TLS e exigido no servidor; clientes devem verificar certificado e hostname.
 
-A Lambda depende da migration que acrescentara o status do cliente; o modelo
-atual da API ainda nao possui esse campo.
-
-## Provas pendentes na nuvem
-
-- Banco privado acessivel pela API e Lambda.
-- Isolamento dos acessos de staging e producao.
-- Migrations executadas uma vez de forma controlada.
-- Backups configurados e restauracao testada.
-- Metricas de conexoes, armazenamento e desempenho.
-- Deploy automatico, URLs/documentacao relacionadas e evidencias de CI/CD.
+Ainda precisam ser demonstrados: bootstrap com privilegios minimos, negacao de acesso entre ambientes, conexao API/Lambda, migrations separadas, restauracao de backup e operacao na AWS. Logs RDS nao substituem logs estruturados, metricas de negocio, alertas e tracing da aplicacao.

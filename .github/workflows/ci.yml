@@ -27,6 +27,8 @@ jobs:
       - name: Check formatting
         run: terraform fmt -check -recursive
       - name: Initialize without remote backend
-        run: terraform init -backend=false -input=false
+        run: terraform init -backend=false -input=false -lockfile=readonly
       - name: Validate configuration
         run: terraform validate -no-color
+      - name: Test infrastructure contracts with mocked AWS
+        run: terraform test -no-color

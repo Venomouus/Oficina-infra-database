@@ -1,20 +1,24 @@
-project_name           = "oficina"
-aws_region             = "us-east-1"
-postgres_major_version = "16"
-allocated_storage_gib  = 20
-backup_retention_days  = 7
+aws_account_id = "123456789012"
+aws_region     = "us-east-1"
 
-# Concessao de custo do laboratorio. Ainda nao ha banco provisionado.
-multi_az = false
-
-# Dois bancos logicos na mesma instancia planejada.
-environments = {
-  staging = {
-    branch        = "develop"
-    database_name = "oficina_staging"
-  }
-  producao = {
-    branch        = "master"
-    database_name = "oficina_producao"
+# Copiar os campos correspondentes do output platform do infra-kubernetes.
+# IDs abaixo sao exemplos; nao podem ser usados para provisionar.
+platform = {
+  contract_version              = 1
+  aws_region                    = "us-east-1"
+  vpc_id                        = "vpc-0123456789abcdef0"
+  database_subnet_ids           = ["subnet-0123456789abcdef0", "subnet-0123456789abcdef1"]
+  application_security_group_id = "sg-0123456789abcdef0"
+  lambda_security_group_ids = {
+    staging  = "sg-0123456789abcdef1"
+    producao = "sg-0123456789abcdef2"
   }
 }
+instance_class            = "db.t4g.small"
+allocated_storage_gib     = 20
+max_allocated_storage_gib = 100
+backup_retention_days     = 7
+multi_az                  = false
+allow_destroy             = false
+# Escolher um identificador unico antes da eventual destruicao/recriacao.
+final_snapshot_identifier = "oficina-lab-final-20260914"
