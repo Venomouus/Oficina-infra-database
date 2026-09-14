@@ -72,13 +72,16 @@ class PermissionsTests(unittest.TestCase):
                         "-e", "POSTGRES_PASSWORD", "postgres:16-alpine"],
                        env=env, check=True, capture_output=True, timeout=180)
         for _ in range(60):
-            result = subprocess.run(["docker", "exec", cls.container, "pg_isready", "-U", "postgres"],
+            # O entrypoint inicia um servidor temporario somente por socket Unix.
+            # Esperar TCP, igual ao Psql.run, evita liberar os testes durante o initdb.
+            result = subprocess.run(["docker", "exec", cls.container, "pg_isready",
+                                     "-h", "127.0.0.1", "-p", "5432", "-U", "postgres", "-d", "postgres"],
                                     capture_output=True, timeout=5)
             if result.returncode == 0:
                 break
             time.sleep(1)
         else:
-            raise RuntimeError("PostgreSQL descartavel nao ficou pronto.")
+            raise RuntimeError("PostgreSQL descartavel nao ficou pronto em TCP 127.0.0.1:5432.")
         cls.cfg = b.read_contract(contract(), "staging")
         cls.runner = b.Psql(cls.cfg, "", prefix=["docker", "exec", "-i", "--env", "PGPASSWORD",
                             "--env", "PGSSLMODE=disable", cls.container, "psql"], local_test=True)
