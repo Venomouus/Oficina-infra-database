@@ -1,65 +1,66 @@
-# Base Terraform do banco
+# Operacao do Terraform RDS
 
-Esta pasta define variaveis validadas e configuracoes planejadas. Ainda nao
-possui provider AWS, backend remoto, instancia RDS, subnet group, security group,
-usuarios, credenciais ou backups reais.
+## Entradas e contrato de rede
 
-## Validacao local
+Copie `terraform.tfvars.example` para `terraform.tfvars` e substitua a conta e os IDs. O objeto `platform` utiliza os campos do output de mesmo nome do infra-kubernetes:
 
-Na raiz do repositorio, com Terraform >= 1.6 e < 2.0:
+- `contract_version = 1`, `aws_region` e `vpc_id`.
+- `database_subnet_ids`: sub-redes isoladas em pelo menos duas AZs.
+- `application_security_group_id`: SG do cluster compartilhado com os nodes/pods.
+- `lambda_security_group_ids`: SGs de staging e producao.
+
+Os data sources consultam as sub-redes, tabelas de rotas efetivas e SGs. O plano rejeita outra VPC, uma unica AZ, atribuicao automatica de IP publico, rotas externas ou regioes divergentes. O provider restringe a conta com `allowed_account_ids`.
+
+O infra-kubernetes continua dono dos SGs Lambda e de suas regras HTTPS. Este repositorio possui somente suas duas regras adicionais de saida PostgreSQL para o SG do banco. Evite adicionar as mesmas regras inline no outro state.
+
+## Backend e plano autenticado — etapa posterior
+
+Requer VPC provisionada, credenciais temporarias autorizadas, bucket de state existente com criptografia/versionamento, bloqueio de acesso publico e IAM limitado ao prefixo do banco. As permissoes do lockfile S3 devem permitir criar, ler e remover o arquivo de lock.
+
+1. Copie `backend.hcl.example` para `backend.hcl` e informe o bucket real.
+2. Mantenha a chave exclusiva `oficina/shared/database.tfstate`. Nao reutilize a chave do Kubernetes, nem crie states separados para develop/master dessa mesma instancia.
+3. Preencha `terraform.tfvars`, incluindo um nome de snapshot final unico.
+4. Confirme a conta e a regiao autenticadas, a disponibilidade da classe/versao e os custos esperados.
+5. Inicialize o backend e produza o plano para revisao:
 
 ```powershell
-terraform -chdir=infra fmt -check -recursive
-terraform -chdir=infra init -backend=false -input=false
-terraform -chdir=infra validate
+terraform -chdir=infra init -reconfigure -backend-config=backend.hcl -input=false
+terraform -chdir=infra plan -out=database.tfplan
+terraform -chdir=infra show -no-color database.tfplan
 ```
 
-A pipeline usa Terraform 1.15.8 e nao solicita credenciais AWS.
+Esses passos ainda nao criam o RDS. A aplicacao do plano revisado pertence a etapa de provisionamento. Nao execute um apply apenas porque o PR foi integrado. O plano salvo e o state devem ser tratados como arquivos restritos e nao versionados.
 
-O arquivo `terraform.tfvars.example` descreve os valores dos dois ambientes.
-Copie para `terraform.tfvars` apenas se precisar testar ajustes locais; arquivos
-de variaveis reais, estados, planos e dumps sao ignorados pelo Git.
+Os testes mock nao demonstram permissoes IAM, quotas, capacidade regional, conectividade real ou sucesso do deploy. A selecao `engine_version = "16"` permite ao RDS resolver uma minor suportada, com atualizacoes menores habilitadas; `engine_version_actual` informa a versao resultante.
 
-## Limite desta validacao
+## Credenciais, TLS e bootstrap
 
-O CI atual verifica a consistencia da estrutura e nao comprova existencia de
-instancia, disponibilidade da versao/classe RDS ou permissoes. Ele nao executa
-plan/apply nem testa conexao com banco.
+RDS cria e gerencia a senha de `oficina_admin` no Secrets Manager. O output `bootstrap_secret_arn` identifica esse segredo sem ler seu valor. Nao usar a conta mestre no runtime, em manifests ou em variaveis publicas de pipeline.
 
-Os campos de criptografia, backups e protecao contra exclusao sao intencoes
-de configuracao. Eles so terao efeito quando os recursos correspondentes forem
-implementados e implantados.
+O output `database` fornece endereco, porta, SG e `planned_environments`. Os nomes planejados **nao significam que os bancos/usuarios ja existem**. O bootstrap deve rodar por uma conexao privada autorizada, por exemplo um Job controlado no EKS:
 
-## Dependencias da fase AWS
+1. Obter a credencial mestre com IAM restrito e sem imprimir o segredo.
+2. Criar bancos distintos e roles de migrations/app/auth para cada ambiente.
+3. Revogar `CONNECT` de PUBLIC em cada banco e conceder acesso somente as roles daquele ambiente.
+4. Revogar privilegios excessivos no schema public. A role app deve ter somente o DML necessario; auth deve consultar somente as colunas de cliente exigidas pelo autenticador; migrations deve possuir as permissoes de DDL.
+5. Configurar default privileges para os objetos futuros do proprietario usado nas migrations.
+6. Guardar as credenciais das roles em segredos separados, com IAM limitado por workload/ambiente e uma estrategia de rotacao.
+7. Executar migrations como tarefa separada e validar os grants usando as roles reais.
 
-1. Receber VPC e subnets privadas da infraestrutura Kubernetes.
-2. Confirmar versao exata do PostgreSQL, classe e armazenamento disponiveis.
-3. Implementar RDS, subnet group, security group e gestao de segredos.
-4. Autorizar acesso de rede para API/Lambda, sem liberar o banco para a internet.
-5. Criar bancos, roles e grants por ambiente com um processo de bootstrap.
-6. Executar migrations controladas pelo repositorio da API.
-7. Validar conexao, backup e restauracao.
-8. Configurar backend remoto, OIDC e deploy automatico dos ambientes.
+A API atual chama migrations no startup. Essa dependencia deve ser removida/condicionada antes de instalar uma credencial de runtime sem DDL. Nao contornar isso usando o usuario mestre na API.
 
-O RDS provisiona o servico; os dois bancos logicos e seus usuarios exigem
-bootstrap SQL separado. Nao assumir que a criacao de uma instancia cria
-automaticamente todos os bancos e grants planejados.
+Configure Npgsql com o hostname RDS do output, `SSL Mode=VerifyFull` e a cadeia de CA RDS apropriada no trust store ou em `Root Certificate`. Nao use IP nem `Trust Server Certificate=true`. O parameter group exige TLS, mas a verificacao da identidade do servidor depende tambem do cliente. Planeje atualizacao da CA.
 
-## Estado compartilhado
+Referencias: [senha gerenciada pelo RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-secrets-manager.html), [TLS no PostgreSQL RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/PostgreSQL.Concepts.General.SSL.html).
 
-A proposta do laboratorio usa uma instancia RDS para dois bancos logicos.
-A instancia precisa de um unico dono e estado Terraform. Nao aplique a mesma
-instancia em dois estados, um por branch.
+## Backups, alteracoes e teardown
 
-O fluxo de promocao da infraestrutura compartilhada e os estados das
-configuracoes por ambiente serao definidos na implementacao do CD.
-Mudancas no mesmo estado precisam de locking remoto e execucao serializada.
+Backups automaticos: sete dias por padrao, janela 03:00–04:00 UTC. Manutencao: domingo 05:00–06:00 UTC. Alteracoes nao sao aplicadas imediatamente; revise o impacto de reboot dos parametros. PostgreSQL e upgrade exportam logs com retencao de sete dias.
 
-## Remocao futura
+Para a demonstracao, restaure um backup/snapshot em uma instancia separada e confira dados e integridade. Backups configurados nao comprovam recuperacao. Nao troque o endpoint da aplicacao antes de validar a restauracao.
 
-Antes da remocao apos a avaliacao, exportar dados necessarios, validar restauracao
-e registrar snapshots a preservar. A protecao contra exclusao precisara de
-uma alteracao deliberada para remover a instancia. Snapshots preservados devem
-ser acompanhados e removidos quando nao forem mais necessarios.
+A exclusao exige duas etapas deliberadas: primeiro configurar `allow_destroy=true`, revisar e aplicar essa mudanca; depois revisar o plano de destruicao. `skip_final_snapshot` permanece false e o nome de snapshot deve ser unico. Backups automaticos sao retidos conforme a politica RDS. Nao remover a protecao apenas para vencer um erro de apply.
 
-Nenhum apply ou destroy foi executado neste PR.
+Destruir o banco e suas regras adicionais antes da rede/SGs do infra-kubernetes. Snapshots, backups e o segredo gerenciado possuem ciclos de vida proprios: confira os recursos remanescentes e as cobrancas apos o teardown. Nunca apague o state como forma de excluir recursos.
+
+A instancia default `db.t4g.small`, storage, Secrets Manager e logs geram custos quando provisionados. Single-AZ reduz disponibilidade; `multi_az=true` muda o custo. Autoscaling pode aumentar o armazenamento ate o teto e nao o reduz automaticamente.

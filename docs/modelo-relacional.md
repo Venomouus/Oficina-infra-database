@@ -1,95 +1,39 @@
-# Modelo relacional e escolha do banco
+# Modelo relacional e migracoes
 
-## Justificativa
+A fonte de verdade do schema e o EF Core em Oficina-Mecanica. Este Terraform provisiona a instancia; nao recria tabelas com SQL paralelo nem aplica migrations.
 
-Manter PostgreSQL aproveita o EF Core/Npgsql e as migrations que ja existem na
-aplicacao. Clientes, veiculos, ordens, servicos e pecas possuem relacionamentos
-explicitos; unicidade de documento/placa/numero e integridade referencial sao
-necessidades centrais do dominio.
+## Entidades existentes
 
-PostgreSQL suporta chaves primarias, estrangeiras e restricoes de unicidade
-adequadas a essas regras. [Documentacao de constraints](https://www.postgresql.org/docs/16/ddl-constraints.html).
-RDS e a proposta para operar esse mesmo motor como banco gerenciado. A escolha
-preserva o modelo existente; configuracao gerenciada e validacao de desempenho
-ainda precisam ser implementadas.
+| Tabela | Conteudo e integridade |
+|---|---|
+| Clientes | Id UUID, nome, CPF/CNPJ unico, contato e Ativo |
+| Veiculos | ClienteId, placa unica, marca/modelo/ano; FK cliente com exclusao restrita |
+| Servicos | Catalogo, preco decimal e flag Ativo |
+| PecasInsumos | Codigo unico, preco decimal, estoque e Ativo |
+| OrdensServico | Cliente/veiculo, numero unico, status, valores e datas; Versao como token de concorrencia |
+| OrdemServicoServico | Itens com nome/preco registrados na OS; FK servico restrita |
+| OrdemServicoPeca | Quantidade e preco registrados na OS; FK peca restrita |
+| HistoricoStatusOrdemServico | Sequencia, status e datas por OS; unicidade de (OrdemServicoId, Sequencia), checks temporais e indice por status/inicio |
 
-## Modelo atual resumido
+Os itens e o historico pertencem a OS e possuem cascade de exclusao por essa relacao. Os valores monetarios usam decimal de precisao definida. Os nomes/precos dos itens preservam o orcamento registrado mesmo se o catalogo mudar.
 
-Baseado no mapeamento
-[OficinaDbContext](https://github.com/Venomouus/Oficina-Mecanica/blob/master/Oficina.Infrastructure/Persistence/OficinaDbContext.cs).
-O diagrama resume chaves e relacionamentos, nao todas as colunas.
+## Fluxo e historico
 
-```mermaid
-erDiagram
-    Clientes ||--o{ Veiculos : possui
-    Clientes ||--o{ OrdensServico : solicita
-    Veiculos ||--o{ OrdensServico : recebe
-    OrdensServico ||--o{ OrdemServicoServico : contem
-    Servicos ||--o{ OrdemServicoServico : referencia
-    OrdensServico ||--o{ OrdemServicoPeca : contem
-    PecasInsumos ||--o{ OrdemServicoPeca : referencia
+A criacao permanece em **Aguardando Aprovacao**, conforme a decisao funcional. A aprovacao registra a resposta do orcamento e inicia a execucao no fluxo atual. Nao inventar um periodo de diagnostico que a OS nao percorreu.
 
-    Clientes {
-        uuid Id PK
-        string CpfCnpj UK
-    }
-    Veiculos {
-        uuid Id PK
-        uuid ClienteId FK
-        string Placa UK
-    }
-    OrdensServico {
-        uuid Id PK
-        uuid ClienteId FK
-        uuid VeiculoId FK
-        string Numero UK
-        string Status
-    }
-    Servicos {
-        uuid Id PK
-        string Nome
-    }
-    PecasInsumos {
-        uuid Id PK
-        string Codigo UK
-    }
-    OrdemServicoServico {
-        uuid Id PK
-        uuid OrdemServicoId FK
-        uuid ServicoId FK
-        decimal ValorUnitario
-    }
-    OrdemServicoPeca {
-        uuid Id PK
-        uuid OrdemServicoId FK
-        uuid PecaInsumoId FK
-        int Quantidade
-        decimal ValorUnitario
-    }
-```
+Periodos antigos sem inicio conhecido ou ainda abertos exigem tratamento explicito nas metricas; nao assumir duracao zero nem preencher datas ficticias. O historico persistido e o token de concorrencia ja pertencem a API, nao sao implementacoes deste Terraform.
 
-Um cliente pode ter varios veiculos e ordens. Cada OS referencia um cliente e
-um veiculo; a coerencia entre o proprietario do veiculo e o cliente da OS
-tambem precisa ser garantida pelo fluxo da aplicacao.
+## Ambientes e acesso
 
-As tabelas OrdemServicoServico e OrdemServicoPeca representam os itens da OS.
-Seus nomes e valores unitarios preservam os dados usados no orcamento mesmo
-quando o cadastro de servicos/pecas muda. O mapeamento restringe exclusao de
-cadastros referenciados e permite exclusao em cascata dos itens ao excluir
-a OS; politicas de retencao do historico devem ser revisadas antes da producao.
+O bootstrap deve criar bancos separados, por exemplo:
 
-## Ajustes ainda pendentes na API
+| Ambiente | Banco | Roles planejadas |
+|---|---|---|
+| staging / develop | oficina_staging | oficina_staging_app, oficina_staging_auth, oficina_staging_migrations |
+| producao / master | oficina_producao | oficina_producao_app, oficina_producao_auth, oficina_producao_migrations |
 
-- Status ativo/inativo do cliente, necessario para autenticacao.
-- Historico das transicoes de status, com inicio/fim para os dashboards.
-- Indices das consultas por status/data e cliente, avaliados com consultas reais.
-- Concorrencia nas operacoes de estoque e geracao do numero de OS.
-- Constraints de dominio, como quantidades validas, conforme as regras definitivas.
-- Execucao controlada das migrations fora da inicializacao de cada replica.
+Conceder DML a API, leitura limitada de clientes ao autenticador e DDL somente a migrations. Configurar grants atuais e default privileges, revogando o acesso PUBLIC entre ambientes. A conta mestre serve somente a bootstrap/administracao controlada.
 
-O historico proposto tera relacao 1:N com a OS e sera atualizado na mesma
-transacao da mudanca de status. Os periodos de diagnostico, execucao e
-finalizacao precisam de definicao consistente antes de calcular as metricas.
+Migrations devem partir do mesmo codigo revisado e rodar por ambiente antes do rollout. A chamada atual de migrations no startup da API precisa ser separada antes de restringir a role de runtime.
 
-Esses ajustes exigem codigo, migrations e testes no repositorio da API.
-Este PR nao altera o schema nem conclui a modelagem exigida para a entrega.
+Indices de consultas por cliente/status/data e concorrencia de estoque precisam ser avaliados com os fluxos reais e EXPLAIN; a presenca de indices e tests unitarios nao comprova desempenho. Testar restauração em um banco separado e conferir OS, itens e historico antes de gravar a evidencia de recuperacao.
