@@ -14,15 +14,9 @@ Implementado em codigo e testado com AWS simulada:
 - Exportacao dos logs PostgreSQL/upgrade ao CloudWatch, com retencao de sete dias.
 - Backend S3 parcial, provider fixado no lockfile e CI de formatacao, validacao e 12 testes sem AWS real.
 
-**Este merge nao provisiona recursos.** A pipeline continua somente de validacao; mantenha `DEPLOY_ENABLED=false` na preparacao dos demais repositorios.
+RDS PostgreSQL 16.13 provisionado no Academy: db.t4g.micro, 20 GiB (limite 30), Single-AZ e backup de um dia para economia. Bancos logicos staging/producao e roles app/auth/migrations preparados por Jobs privados; migrations reais executadas.
 
-Ainda pendente:
-
-- Provisionar a rede, preparar o backend e executar um plano autenticado com os IDs reais.
-- Executar o bootstrap privado ja implementado para criar bancos/roles e preencher os segredos apos provisionar o RDS.
-- Separar migrations do startup da API antes de usar uma role de runtime sem DDL.
-- Integrar API no EKS e autenticacao Lambda, automatizar CD e validar restauracao dos backups.
-- Completar observabilidade da aplicacao e evidencias da demonstracao na AWS.
+O workflow `academy-deploy.yml` faz deploy de develop/master no runner Windows autorizado (label academy). Requer PC/Docker ativos e credenciais temporarias Academy validas. O codigo compartilhado de deploy fica em [Oficina-Mecanica/academy](https://github.com/Venomouus/Oficina-Mecanica/tree/master/academy). Evidencias e limites finais estao no [pacote de entrega](https://github.com/Venomouus/Oficina-Mecanica/tree/master/docs/entrega).
 
 ## Validacao local sem AWS
 
@@ -59,3 +53,16 @@ A CI preserva o check validate-terraform e acrescenta Python/PostgreSQL descarta
 e SQL real de migrations da API em revisao fixa. Sao 12 testes Terraform simulados
 e 14 testes de bootstrap/permissoes, sem credenciais AWS. Localmente, sem informar
 BOOTSTRAP_MIGRATIONS_SQL, o teste adicional do EF fica skipped.
+
+## Diagrama e contrato das APIs
+
+```mermaid
+flowchart LR
+    TF[Terraform banco] --> RDS[(RDS PostgreSQL privado)]
+    API[API no EKS - role app] --> RDS
+    Lambda[Lambda CPF - role auth] --> RDS
+    Job[Job migrations - role migrations] --> RDS
+    RDS --> SM[Secrets Manager - senha mestre]
+```
+
+[Postman das APIs integradas](https://github.com/Venomouus/Oficina-Mecanica/blob/master/docs/entrega/Oficina-AWS.postman_collection.json).

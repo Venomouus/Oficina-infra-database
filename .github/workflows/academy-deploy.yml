@@ -1,0 +1,58 @@
+name: Deploy AWS Academy
+on:
+  push:
+    branches: [develop, master]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: academy-${{ github.repository }}-${{ github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/master'
+    runs-on: [self-hosted, Windows, academy]
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: powershell
+        working-directory: Oficina-Mecanica
+    env:
+      AWS_PROFILE: academy
+      AWS_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: Venomouus/Oficina-Mecanica
+          ref: ${{ github.event.repository.name == 'Oficina-Mecanica' && github.sha || github.ref_name }}
+          path: Oficina-Mecanica
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Venomouus/Oficina-infra-kubernetes
+          ref: ${{ github.event.repository.name == 'Oficina-infra-kubernetes' && github.sha || github.ref_name }}
+          path: Oficina-Kubernetes/Oficina-infra-kubernetes
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Venomouus/Oficina-infra-database
+          ref: ${{ github.event.repository.name == 'Oficina-infra-database' && github.sha || github.ref_name }}
+          path: Oficina-Database/Oficina-infra-database
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Venomouus/Oficina-serverless
+          ref: ${{ github.event.repository.name == 'Oficina-serverless' && github.sha || github.ref_name }}
+          path: Oficina-Serverless/Oficina-serverless
+          persist-credentials: false
+      - name: Deploy do repositorio no ambiente da branch
+        env:
+          DEPLOY_REPOSITORY: ${{ github.event.repository.name }}
+          DEPLOY_BRANCH: ${{ github.ref_name }}
+        run: |
+          $env:AWS_SHARED_CREDENTIALS_FILE = Join-Path $env:USERPROFILE '.aws/credentials'
+          python -m pip install --quiet --target local/.aws-sdk.local boto3
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python academy/cd.py --repository $env:DEPLOY_REPOSITORY --branch $env:DEPLOY_BRANCH
+          exit $LASTEXITCODE
