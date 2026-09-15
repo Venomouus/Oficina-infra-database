@@ -53,3 +53,16 @@ A CI preserva o check validate-terraform e acrescenta Python/PostgreSQL descarta
 e SQL real de migrations da API em revisao fixa. Sao 12 testes Terraform simulados
 e 14 testes de bootstrap/permissoes, sem credenciais AWS. Localmente, sem informar
 BOOTSTRAP_MIGRATIONS_SQL, o teste adicional do EF fica skipped.
+
+## Diagrama e contrato das APIs
+
+```mermaid
+flowchart LR
+    TF[Terraform banco] --> RDS[(RDS PostgreSQL privado)]
+    API[API no EKS - role app] --> RDS
+    Lambda[Lambda CPF - role auth] --> RDS
+    Job[Job migrations - role migrations] --> RDS
+    RDS --> SM[Secrets Manager - senha mestre]
+```
+
+[Postman das APIs integradas](https://github.com/Venomouus/Oficina-Mecanica/blob/master/docs/entrega/Oficina-AWS.postman_collection.json).
