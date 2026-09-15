@@ -47,8 +47,9 @@ resource "aws_db_subnet_group" "database" {
     }
     precondition {
       condition = alltrue([
+        # O provider omite rotas locais implicitas; lista vazia tambem e isolada.
         for table in data.aws_route_table.database :
-        table.vpc_id == var.platform.vpc_id && length(table.routes) > 0 &&
+        table.vpc_id == var.platform.vpc_id &&
         alltrue([for route in table.routes : route.gateway_id == "local"])
       ])
       error_message = "Use sub-redes isoladas: as tabelas devem conter somente rotas locais da VPC."
